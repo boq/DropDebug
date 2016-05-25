@@ -1,0 +1,118 @@
+buildscript {
+    repositories {
+        mavenCentral()
+       
+        maven {
+            name = 'Forge'
+            url = 'http://files.minecraftforge.net/maven'
+        }
+
+        maven {
+            name = "Sonatype Nexus"
+            url = "https://oss.sonatype.org/content/repositories/snapshots/"
+        }
+    }
+
+
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:1.2-SNAPSHOT'
+    }
+}
+
+apply plugin: 'forge'
+
+
+version = mc_ver + "-" + mod_version
+
+ext.env = System.getenv()
+
+ext.in_jenkins = false
+
+ext.jenkinsManifest = manifest {
+    if (env.BUILD_TAG != null) { // If this works, we'll assume we're in Jenkins atleast.
+        attributes("Jenkins-Build": "true", "Jenkins-Tag": env.BUILD_TAG, "Jenkins-ID": env.BUILD_ID)
+        in_jenkins = true
+    } else {
+        attributes("Jenkins-Build": "false")
+    }
+}
+
+def branch = null
+def hash = null
+def proc1 = "git rev-parse --short HEAD".execute()
+proc1.in.eachLine { line -> hash = line }
+proc1.err.eachLine { line -> println line }
+proc1.waitFor()
+
+if (!in_jenkins) {
+    def proc2 = "git rev-parse --abbrev-ref HEAD".execute()
+    proc2.in.eachLine { line -> branch = line }
+    proc2.err.eachLine { line -> println line }
+    proc2.waitFor()
+} else {
+    branch = env.GIT_BRANCH.minus("origin/")
+}
+
+// If not on master, add branch to jar name
+if (branch != null && !branch.equals("master")) {
+    version += "-" + branch
+} else {
+    //version += "-" + hash
+}
+
+if (env.BUILD_NUMBER != null) {
+    version += "-snapshot-" + env.BUILD_NUMBER
+}
+
+ext.gitManifest = manifest {
+    if (branch != null) {
+        attributes("Git-Branch": branch, "Git-Hash": hash)
+    }
+}
+
+minecraft {
+    version = mc_ver + "-" + forge_ver
+    runDir = "run"
+
+    replaceIn 'openmods/dropdebug/DropDebug.java'
+    replace '$VERSION$', mod_version
+}
+
+processResources {
+    inputs.property "version", rootProject.mod_version
+
+    from(sourceSets.main.resources.srcDirs) {
+        include '**/*.info'
+        expand 'version':mod_version, 'mc_version':mc_ver
+    }
+
+    from(sourceSets.main.resources.srcDirs) {
+        exclude '**/*.info'
+    }
+}
+
+ext.fmlManifest = manifest {
+    //attributes("FMLCorePlugin": "openblocks.OpenBlocksCorePlugin", "FMLCorePluginContainsFMLMod": "true")
+}
+
+jar {
+    manifest {
+        from jenkinsManifest, gitManifest, fmlManifest
+    }
+}
+
+task deobfJar(type: Jar) {
+    from sourceSets.main.output
+    classifier = 'deobf'
+    manifest {
+        from jenkinsManifest, gitManifest, fmlManifest
+    }
+}
+
+artifacts {
+    archives deobfJar
+}
+
+task wrapper (type: Wrapper) {
+    gradleVersion = "2.12"
+}
